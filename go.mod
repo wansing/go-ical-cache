@@ -1,4 +1,4 @@
-module github.com/wansing/icalcache
+module github.com/wansing/go-ical-cache
 
 go 1.23.4
 
