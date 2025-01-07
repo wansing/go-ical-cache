@@ -49,8 +49,6 @@ type Event struct {
 	Summary string
 }
 
-// Cache gets events from an ical feed and caches them for the given interval.
-// After each interval, calls to update have to wait until the http request is done.
 type Cache struct {
 	Config
 	Interval     time.Duration // default is two minutes
