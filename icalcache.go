@@ -42,6 +42,7 @@ func LoadConfig(jsonfile string) (Config, error) {
 }
 
 type Event struct {
+	AllDay  bool
 	Start   time.Time
 	End     time.Time
 	UID     string
@@ -150,6 +151,13 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 				}
 			}
 
+			var allDay = false
+			if startProp := event.Props.Get(ical.PropDateTimeStart); startProp != nil {
+				if startProp.ValueType() == ical.ValueDate {
+					allDay = true
+				}
+			}
+
 			// go-ical "use[s] the TZID location, if available"
 			start, err := event.DateTimeStart(defaultLocation)
 			if err != nil {
@@ -166,11 +174,12 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 			}
 
 			events = append(events, Event{
-				UID:     uid,
-				Summary: summary,
-				URL:     urlString,
+				AllDay:  allDay,
 				Start:   start,
 				End:     end,
+				UID:     uid,
+				URL:     urlString,
+				Summary: summary,
 			})
 		}
 
