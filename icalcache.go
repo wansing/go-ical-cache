@@ -42,13 +42,14 @@ func LoadConfig(jsonfile string) (Config, error) {
 }
 
 type Event struct {
-	AllDay      bool
-	Start       time.Time
-	End         time.Time
-	UID         string
-	URL         string
-	Summary     string
-	Description string
+	AllDay         bool
+	Start          time.Time
+	End            time.Time
+	RecurrenceRule string
+	UID            string
+	URL            string
+	Summary        string
+	Description    string
 }
 
 type Cache struct {
@@ -173,19 +174,27 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 				return nil, fmt.Errorf("getting end time: %w", err)
 			}
 
+			var rrule string
+			if rOption, err := event.Props.RecurrenceRule(); err != nil {
+				return nil, fmt.Errorf("getting end recurrence rule: %w", err)
+			} else if rOption != nil {
+				rrule = rOption.String()
+			}
+
 			var urlString string
 			if url != nil {
 				urlString = url.String()
 			}
 
 			events = append(events, Event{
-				AllDay:      allDay,
-				Start:       start,
-				End:         end,
-				UID:         uid,
-				URL:         urlString,
-				Summary:     summary,
-				Description: description,
+				AllDay:         allDay,
+				Start:          start,
+				End:            end,
+				RecurrenceRule: rrule,
+				UID:            uid,
+				URL:            urlString,
+				Summary:        summary,
+				Description:    description,
 			})
 		}
 
