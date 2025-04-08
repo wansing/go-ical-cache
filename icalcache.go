@@ -42,12 +42,13 @@ func LoadConfig(jsonfile string) (Config, error) {
 }
 
 type Event struct {
-	AllDay  bool
-	Start   time.Time
-	End     time.Time
-	UID     string
-	URL     string
-	Summary string
+	AllDay      bool
+	Start       time.Time
+	End         time.Time
+	UID         string
+	URL         string
+	Summary     string
+	Description string
 }
 
 type Cache struct {
@@ -132,6 +133,10 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 			if err != nil {
 				return nil, fmt.Errorf("getting summary: %w", err)
 			}
+			description, err := event.Props.Text(ical.PropDescription)
+			if err != nil {
+				return nil, fmt.Errorf("getting description: %w", err)
+			}
 			url, err := event.Props.URI(ical.PropURL)
 			if err != nil {
 				return nil, fmt.Errorf("getting url: %w", err)
@@ -174,12 +179,13 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 			}
 
 			events = append(events, Event{
-				AllDay:  allDay,
-				Start:   start,
-				End:     end,
-				UID:     uid,
-				URL:     urlString,
-				Summary: summary,
+				AllDay:      allDay,
+				Start:       start,
+				End:         end,
+				UID:         uid,
+				URL:         urlString,
+				Summary:     summary,
+				Description: description,
 			})
 		}
 
