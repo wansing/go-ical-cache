@@ -2,8 +2,10 @@ package icalcache
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"os"
@@ -57,6 +59,7 @@ type Cache struct {
 	Interval     time.Duration // default is two minutes
 	events       []Event
 	lastChecked  time.Time
+	lastHashSum  string
 	lastModified time.Time
 	lock         sync.RWMutex
 }
@@ -95,7 +98,9 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 			return nil, err
 		}
 
+		var httpLastModifiedWasAvailable = false
 		if lastModified, err := time.Parse("Mon, 02 Jan 2006 15:04:05 GMT", resp.Header.Get("Last-Modified")); err == nil {
+			httpLastModifiedWasAvailable = true
 			if lastModified.Before(cache.lastModified) || lastModified.Equal(cache.lastModified) {
 				return cache.events, nil
 			}
@@ -115,7 +120,9 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 			return nil, err
 		}
 
-		cal, err := ical.NewDecoder(resp.Body).Decode()
+		hash := fnv.New64()
+
+		cal, err := ical.NewDecoder(io.TeeReader(resp.Body, hash)).Decode()
 		if err == io.EOF { // no calendars in file
 			cache.events = nil
 			return cache.events, nil
@@ -123,6 +130,14 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		hashSum := base64.StdEncoding.EncodeToString(hash.Sum(nil))
+		if !httpLastModifiedWasAvailable {
+			if hashSum != cache.lastHashSum {
+				cache.lastModified = time.Now() // only if upstream did not send a Last-Modified HTTP header (else time.Now() competes with upcoming upstream Last-Modified timestamps)
+			}
+		}
+		cache.lastHashSum = hashSum
 
 		var events []Event
 		for _, event := range cal.Events() {
