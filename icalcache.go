@@ -62,14 +62,14 @@ type Cache struct {
 	events       []Event
 	lastChecked  time.Time
 	lastHashSum  string
-	lastModified time.Time
+	lastModified int64
 }
 
 // Get returns all events. The defaultLocation parameter is used if the ical data contains no TZID location.
-func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
+func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, int64, error) {
 	// check cache configuration
 	if cache.URL == "" {
-		return nil, nil
+		return nil, 0, nil
 	}
 	if cache.Interval < 30*time.Second { // see also http client timeout
 		cache.Interval = 2 * time.Minute
@@ -81,14 +81,14 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 
 	// skip if upstream has recently been checked
 	if time.Since(cache.lastChecked) < cache.Interval {
-		return cache.events, nil
+		return cache.events, cache.lastModified, nil
 	}
 	cache.lastChecked = time.Now()
 
 	// HTTP HEAD upstream
 	req, err := http.NewRequest(http.MethodHead, cache.URL, nil)
 	if err != nil {
-		return cache.events, fmt.Errorf("making upstream header request: %w", err)
+		return cache.events, cache.lastModified, fmt.Errorf("making upstream header request: %w", err)
 	}
 	if cache.Config.Username != "" {
 		req.SetBasicAuth(cache.Config.Username, cache.Config.Password)
@@ -98,30 +98,30 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return cache.events, fmt.Errorf("getting upstream headers: %w", err)
+		return cache.events, cache.lastModified, fmt.Errorf("getting upstream headers: %w", err)
 	}
 
 	// skip if upstream has a Last-Modified header whose value is older
 	var httpLastModifiedWasAvailable = false
-	if lastModified, err := time.Parse("Mon, 02 Jan 2006 15:04:05 GMT", resp.Header.Get("Last-Modified")); err == nil {
+	if httpLastModified, err := time.Parse("Mon, 02 Jan 2006 15:04:05 GMT", resp.Header.Get("Last-Modified")); err == nil {
 		httpLastModifiedWasAvailable = true
-		if lastModified.Before(cache.lastModified) || lastModified.Equal(cache.lastModified) {
-			return cache.events, nil
+		if httpLastModified.Unix() <= cache.lastModified { // http timestamp before or equal cache timestamp
+			return cache.events, cache.lastModified, nil
 		}
-		cache.lastModified = lastModified
+		cache.lastModified = httpLastModified.Unix()
 	}
 
 	// HTTP GET upstream
 	req, err = http.NewRequest(http.MethodGet, cache.URL, nil)
 	if err != nil {
-		return cache.events, fmt.Errorf("making upstream request: %w", err)
+		return cache.events, cache.lastModified, fmt.Errorf("making upstream request: %w", err)
 	}
 	if cache.Config.Username != "" {
 		req.SetBasicAuth(cache.Config.Username, cache.Config.Password)
 	}
 	resp, err = client.Do(req)
 	if err != nil {
-		return cache.events, fmt.Errorf("getting upstream data: %w", err)
+		return cache.events, cache.lastModified, fmt.Errorf("getting upstream data: %w", err)
 	}
 
 	// parse response body as ical and also hash it
@@ -129,39 +129,39 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 	cal, err := ical.NewDecoder(io.TeeReader(resp.Body, hash)).Decode()
 	if err == io.EOF { // no calendars in file
 		cache.events = nil
-		return cache.events, nil
+		return cache.events, cache.lastModified, nil
 	}
 	if err != nil {
-		return cache.events, fmt.Errorf("decoding upstream ical data: %w", err)
+		return cache.events, cache.lastModified, fmt.Errorf("decoding upstream ical data: %w", err)
 	}
 
 	// update lastHashSum (which is a fallback if HTTP Last-Modified header is missing), update lastModified if the HTTP Last-Modified header was missing
 	hashSum := base64.StdEncoding.EncodeToString(hash.Sum(nil))
 	if !httpLastModifiedWasAvailable {
 		if hashSum != cache.lastHashSum {
-			cache.lastModified = time.Now() // only if upstream did not send a Last-Modified HTTP header (else time.Now() competes with upcoming upstream Last-Modified timestamps)
+			cache.lastModified = time.Now().Unix() // only if upstream did not send a Last-Modified HTTP header (else time.Now() competes with upcoming upstream Last-Modified timestamps)
 		}
 	}
 	cache.lastHashSum = hashSum
 
-	// update events
+	// Update events. If an error occurs, we return an empty event list because that's better than an incomplete list.
 	cache.events = cache.events[:0]
 	for _, event := range cal.Events() {
 		uid, err := event.Props.Text(ical.PropUID)
 		if err != nil {
-			return nil, fmt.Errorf("getting uid: %w", err)
+			return nil, 0, fmt.Errorf("getting uid: %w", err)
 		}
 		summary, err := event.Props.Text(ical.PropSummary)
 		if err != nil {
-			return nil, fmt.Errorf("getting summary: %w", err)
+			return nil, 0, fmt.Errorf("getting summary: %w", err)
 		}
 		description, err := event.Props.Text(ical.PropDescription)
 		if err != nil {
-			return nil, fmt.Errorf("getting description: %w", err)
+			return nil, 0, fmt.Errorf("getting description: %w", err)
 		}
 		url, err := event.Props.URI(ical.PropURL)
 		if err != nil {
-			return nil, fmt.Errorf("getting url: %w", err)
+			return nil, 0, fmt.Errorf("getting url: %w", err)
 		}
 
 		// replace TZIDs which can't be loaded by time.LoadLocation (workaround for https://github.com/emersion/go-ical/issues/10) with target location
@@ -188,16 +188,16 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 		// go-ical "use[s] the TZID location, if available"
 		start, err := event.DateTimeStart(defaultLocation)
 		if err != nil {
-			return nil, fmt.Errorf("getting start time: %w", err)
+			return nil, 0, fmt.Errorf("getting start time: %w", err)
 		}
 		end, err := event.DateTimeEnd(defaultLocation)
 		if err != nil {
-			return nil, fmt.Errorf("getting end time: %w", err)
+			return nil, 0, fmt.Errorf("getting end time: %w", err)
 		}
 
 		var rrule string
 		if rOption, err := event.Props.RecurrenceRule(); err != nil {
-			return nil, fmt.Errorf("getting end recurrence rule: %w", err)
+			return nil, 0, fmt.Errorf("getting end recurrence rule: %w", err)
 		} else if rOption != nil {
 			rrule = rOption.String()
 		}
@@ -219,5 +219,5 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 		})
 	}
 
-	return cache.events, nil
+	return cache.events, cache.lastModified, nil
 }
