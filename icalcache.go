@@ -78,7 +78,8 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 		return cache.events, nil
 	}
 
-	// first call takes the write lock and does the job, subsequent calls wait until the job is finished
+	// The first call locks the cache and fetches from upstream.
+	// Subsequent calls have to wait. (Else they would always get stale data in scenarios with frequent upstream changes and few calls.)
 	if cache.lock.TryLock() {
 		defer cache.lock.Unlock()
 
