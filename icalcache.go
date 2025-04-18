@@ -88,7 +88,7 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 	// HTTP HEAD upstream
 	req, err := http.NewRequest(http.MethodHead, cache.URL, nil)
 	if err != nil {
-		return nil, err
+		return cache.events, fmt.Errorf("making upstream header request: %w", err)
 	}
 	if cache.Config.Username != "" {
 		req.SetBasicAuth(cache.Config.Username, cache.Config.Password)
@@ -98,7 +98,7 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return cache.events, fmt.Errorf("getting upstream headers: %w", err)
 	}
 
 	// skip if upstream has a Last-Modified header whose value is older
@@ -114,14 +114,14 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 	// HTTP GET upstream
 	req, err = http.NewRequest(http.MethodGet, cache.URL, nil)
 	if err != nil {
-		return nil, err
+		return cache.events, fmt.Errorf("making upstream request: %w", err)
 	}
 	if cache.Config.Username != "" {
 		req.SetBasicAuth(cache.Config.Username, cache.Config.Password)
 	}
 	resp, err = client.Do(req)
 	if err != nil {
-		return nil, err
+		return cache.events, fmt.Errorf("getting upstream data: %w", err)
 	}
 
 	// parse response body as ical and also hash it
@@ -132,7 +132,7 @@ func (cache *Cache) Get(defaultLocation *time.Location) ([]Event, error) {
 		return cache.events, nil
 	}
 	if err != nil {
-		return nil, err
+		return cache.events, fmt.Errorf("decoding upstream ical data: %w", err)
 	}
 
 	// update lastHashSum (which is a fallback if HTTP Last-Modified header is missing), update lastModified if the HTTP Last-Modified header was missing
